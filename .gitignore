@@ -10,3 +10,4 @@ lib/__pycache__/
 autocomplete/__pycache__/
 lib/aws/__pycache__/
 .aws/
+deploy/secrets

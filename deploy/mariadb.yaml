@@ -1,0 +1,232 @@
+kind: List
+apiVersion: v1
+items:
+- apiVersion: image.openshift.io/v1
+  kind: ImageStream
+  metadata:
+    labels:
+      build: mariadb
+    name: mariadb
+  spec:
+    lookupPolicy:
+      local: false
+    tags:
+    - from:
+        kind: DockerImage
+        name: registry.redhat.io/rhel8/mariadb-103:latest
+      importPolicy: {}
+      name: "10.3"
+      referencePolicy:
+        type: Source
+
+
+- apiVersion: build.openshift.io/v1
+  kind: BuildConfig
+  metadata:
+    labels:
+      build: mariadb
+    name: mariadb
+  spec:
+    failedBuildsHistoryLimit: 5
+    output:
+      to:
+        kind: ImageStreamTag
+        name: mariadb:secure
+    runPolicy: Serial
+    source:
+      dockerfile: |-
+        FROM registry.redhat.io/rhel8/mariadb-103:latest
+        USER root
+
+        # we will use stunnel to expose a secure connection to the router
+        RUN yum install -y stunnel && yum clean all
+        # we will expect certificate and config to be mounted here
+        VOLUME /etc/stunnel
+        # and secured connection port
+        EXPOSE 3307
+        # override the startup command to bring up stunnel first
+        CMD stunnel /etc/stunnel/stunnel-server.conf && run-mysqld
+
+        # have mariadb ignore the netapp .snapshot dir we get in PSI
+        RUN sed -ie "/trashcan/ aignore-db-dirs=.snapshot" /etc/my.cnf
+
+        # container user, though ignored if running in openshift
+        USER 27
+      type: Dockerfile
+    strategy:
+      dockerStrategy:
+        from:
+          kind: ImageStreamTag
+          name: mariadb:10.3
+      type: Docker
+    successfulBuildsHistoryLimit: 5
+    triggers:
+    - imageChange:
+        lastTriggeredImageID: null
+      type: ImageChange
+    - type: ConfigChange
+
+- apiVersion: v1
+  kind: PersistentVolumeClaim
+  metadata:
+    finalizers:
+    - kubernetes.io/pvc-protection
+    name: mariadb
+  spec:
+    accessModes:
+    - ReadWriteOnce
+    resources:
+      requests:
+        storage: 10Gi
+    storageClassName: dynamic-nfs
+
+- apiVersion: apps.openshift.io/v1
+  kind: DeploymentConfig
+  metadata:
+    name: mariadb
+  spec:
+    replicas: 1
+    revisionHistoryLimit: 10
+    selector:
+      name: mariadb
+    strategy:
+      activeDeadlineSeconds: 21600
+      recreateParams:
+        timeoutSeconds: 600
+      resources: {}
+      type: Recreate
+    template:
+      metadata:
+        creationTimestamp: null
+        labels:
+          name: mariadb
+      spec:
+        containers:
+        - env:
+          - name: MYSQL_USER
+            valueFrom:
+              secretKeyRef:
+                key: database-user
+                name: mariadb
+          - name: MYSQL_PASSWORD
+            valueFrom:
+              secretKeyRef:
+                key: database-password
+                name: mariadb
+          - name: MYSQL_ROOT_PASSWORD
+            valueFrom:
+              secretKeyRef:
+                key: database-root-password
+                name: mariadb
+          - name: MYSQL_DATABASE
+            valueFrom:
+              secretKeyRef:
+                key: database-name
+                name: mariadb
+          imagePullPolicy: IfNotPresent
+          livenessProbe:
+            failureThreshold: 3
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            successThreshold: 1
+            tcpSocket:
+              port: 3306
+            timeoutSeconds: 1
+          name: mariadb
+          ports:
+          - containerPort: 3306
+            protocol: TCP
+          - containerPort: 3307
+            protocol: TCP
+          readinessProbe:
+            exec:
+              command:
+              - /bin/sh
+              - -i
+              - -c
+              - MYSQL_PWD="$MYSQL_PASSWORD" mysql -h 127.0.0.1 -u $MYSQL_USER -D $MYSQL_DATABASE
+                -e 'SELECT 1'
+            failureThreshold: 3
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            successThreshold: 1
+            timeoutSeconds: 1
+          resources:
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          terminationMessagePath: /dev/termination-log
+          terminationMessagePolicy: File
+          volumeMounts:
+          - mountPath: /var/lib/mysql/data
+            name: mariadb-data
+          - mountPath: /etc/stunnel/
+            name: volume-ubk1q
+            readOnly: true
+        dnsPolicy: ClusterFirst
+        restartPolicy: Always
+        schedulerName: default-scheduler
+        securityContext: {}
+        terminationGracePeriodSeconds: 30
+        volumes:
+        - name: mariadb-data
+          persistentVolumeClaim:
+            claimName: mariadb
+        - name: volume-ubk1q
+          secret:
+            defaultMode: 420
+            items:
+            - key: server-cert-chain.pem
+              path: server-cert-chain.pem
+            - key: server-key.pem
+              path: server-key.pem
+            - key: stunnel-server.conf
+              path: stunnel-server.conf
+            secretName: mariadb-secure
+    test: false
+    triggers:
+    - imageChangeParams:
+        automatic: true
+        containerNames:
+        - mariadb
+        from:
+          kind: ImageStreamTag
+          name: mariadb:secure
+      type: ImageChange
+    - type: ConfigChange
+
+- apiVersion: v1
+  kind: Service
+  metadata:
+    name: mariadb
+  spec:
+    ports:
+    - name: mariadb
+      port: 3306
+      protocol: TCP
+      targetPort: 3306
+    - name: mariadb-secure
+      port: 3307
+      protocol: TCP
+      targetPort: 3307
+    selector:
+      name: mariadb
+    sessionAffinity: None
+    type: ClusterIP
+
+- apiVersion: route.openshift.io/v1
+  kind: Route
+  metadata:
+    name: mariadb
+  spec:
+    host: art-dash-mariadb.cloud.ocp4.psi.redhat.com
+    port:
+      targetPort: mariadb-secure
+    tls:
+      termination: passthrough
+    to:
+      kind: Service
+      name: mariadb
+      weight: 100
+    wildcardPolicy: None
+
