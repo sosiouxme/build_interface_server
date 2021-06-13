@@ -26,8 +26,8 @@ items:
     runPolicy: Serial
     source:
       git:
-        ref: master
-        uri: https://github.com/openshift-eng/art-dashboard-server
+        ref: update_deployment
+        uri: https://github.com/sosiouxme/art-dashboard-server
       type: Git
     strategy:
       dockerStrategy:
@@ -61,7 +61,7 @@ items:
     source:
       git:
         ref: master
-        uri: https://github.com/openshift-eng/art-dashboard-server
+        uri: https://github.com/sosiouxme/art-dashboard-server
       type: Git
     strategy:
       dockerStrategy:
