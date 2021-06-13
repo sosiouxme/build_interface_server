@@ -95,7 +95,7 @@ items:
           value: mariadb.aos-art-web.svc
         from:
           kind: ImageStreamTag
-          name: art-dash-server
+          name: art-dash-server:base
         dockerfilePath: Dockerfile.update
       type: Docker
     successfulBuildsHistoryLimit: 5
