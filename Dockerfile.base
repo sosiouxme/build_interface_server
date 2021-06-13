@@ -1,0 +1,8 @@
+FROM fedora:34
+USER root
+RUN dnf install -y krb5-workstation python3.6 python3-pip krb5-devel openssl-devel cronie \
+ && dnf clean all
+WORKDIR /opt/app-root/src
+COPY requirements.txt ./
+RUN pip3 install -r requirements.txt
+EXPOSE 8080

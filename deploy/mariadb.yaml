@@ -48,9 +48,11 @@ items:
         CMD stunnel /etc/stunnel/stunnel-server.conf && run-mysqld
 
         # have mariadb ignore the netapp .snapshot dir we get in PSI
-        RUN sed -ie "/trashcan/ aignore-db-dirs=.snapshot" /etc/my.cnf
+        # and replace old option names so it complains less
+        RUN sed -ie "/trashcan/ aignore_db_dirs=.snapshot" \
+                -e  "s/ignore-db-dir=/ignore_db_dirs=" /etc/my.cnf
 
-        # container user, though ignored if running in openshift
+        # container user (though ignored if running in openshift)
         USER 27
       type: Dockerfile
     strategy:
